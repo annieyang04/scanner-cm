@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Cloud & Chill 雲上微醺之夜 — 貴賓報到系統</title>
+  
+  <!-- 引入手機 QR 掃描函式庫 -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, "PingFang TC", "Microsoft JhengHei", sans-serif;
+      background-color: #f1f5f9;
+      color: #1e293b;
+      display: flex;
+      justify-content: center;
+      padding: 16px;
+      min-height: 100vh;
+    }
+    .app-container {
+      width: 100%;
+      max-width: 480px;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      color: #ffffff;
+      padding: 20px;
+      text-align: center;
+      border-bottom: 4px solid #1a73e8;
+    }
+    .header h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .header p { font-size: 12px; color: #94a3b8; }
+    
+    .scanner-section {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #reader {
+      width: 100% !important;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px dashed #cbd5e1 !important;
+      background-color: #000000;
+    }
+    
+    .manual-box {
+      width: 100%;
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+    }
+    .manual-box input {
+      flex: 1;
+      padding: 12px 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+    }
+    .manual-box input:focus { border-color: #1a73e8; }
+    .manual-box button {
+      padding: 12px 18px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    /* 報到結果彈出卡片 */
+    .result-card {
+      margin: 16px 20px 20px;
+      padding: 20px;
+      border-radius: 12px;
+      text-align: center;
+      display: none;
+      animation: fadeIn 0.25s ease-in-out;
+    }
+    .result-success { background: #f0fdf4; border: 1.5px solid #86efac; color: #166534; }
+    .result-warning { background: #fffbeb; border: 1.5px solid #fde68a; color: #9a3412; }
+    .result-error   { background: #fef2f2; border: 1.5px solid #fca5a5; color: #991b1b; }
+
+    .result-badge {
+      display: inline-block;
+      font-size: 28px;
+      font-weight: 800;
+      color: #1a73e8;
+      margin-bottom: 8px;
+    }
+    .guest-info {
+      margin: 12px 0;
+      font-size: 14px;
+      line-height: 1.7;
+      text-align: left;
+      background: rgba(255, 255, 255, 0.6);
+      padding: 12px 16px;
+      border-radius: 8px;
+    }
+    .btn-reset {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
+      background: #1e293b;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    <div class="header">
+      <h1>Cloud & Chill 雲上微醺之夜</h1>
+      <p>現場貴賓快速報到系統</p>
+    </div>
+
+    <!-- 鏡頭掃描區 -->
+    <div class="scanner-section">
+      <div id="reader"></div>
+
+      <!-- 手動快速輸入區 -->
+      <div class="manual-box">
+        <input type="text" id="manualInput" placeholder="輸入報到編號 (如 001) 或手機號碼" />
+        <button onclick="handleManualCheckIn()">確認</button>
+      </div>
+    </div>
+
+    <!-- 結果顯示區 -->
+    <div id="resultCard" class="result-card">
+      <div id="resultStatus" style="font-size: 18px; font-weight: 700; margin-bottom: 6px;"></div>
+      <div id="resultBadge" class="result-badge"></div>
+      
+      <div class="guest-info" id="guestInfo"></div>
+
+      <button class="btn-reset" onclick="resumeScanning()">繼續掃描下一位</button>
+    </div>
+  </div>
+
+  <script>
+    // ⚙️ 請貼上剛剛在 Google Apps Script 部署取得的 Web App 網址：
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzki-UTmUjj2LCAajKwCvlDytcJEFTf6KiNsC-RCi7yMctKFHd5HI31aTUhDKwEul4_nA/exec";
+
+    let html5QrCode = null;
+    let isProcessing = false;
+
+    // 啟動相機
+    function startCamera() {
+      html5QrCode = new Html5Qrcode("reader");
+      const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+
+      html5QrCode.start(
+        { facingMode: "environment" }, // 優先使用手機後鏡頭
+        config,
+        onScanSuccess
+      ).catch(err => {
+        console.error("相機啟動失敗:", err);
+        alert("無法啟用相機，請確認是否允許瀏覽器使用相機權限，且網址需為 HTTPS 連線！");
+      });
+    }
+
+    // 掃描成功觸發
+    function onScanSuccess(decodedText) {
+      if (isProcessing) return;
+      isProcessing = true;
+
+      playBeep(); // 播放掃描成功提示音
+
+      // 解析 QR Code 內容 (格式如: 編號:001|姓名:Annie|電話:0912345678)
+      let regId = "", name = "", phone = "";
+      const parts = decodedText.split("|");
+      parts.forEach(p => {
+        if (p.includes("編號:")) regId = p.replace("編號:", "").trim();
+        if (p.includes("姓名:")) name = p.replace("姓名:", "").trim();
+        if (p.includes("電話:")) phone = p.replace("電話:", "").trim();
+      });
+
+      // 若非特殊格式，直接將整個字串作為 ID/手機送出
+      if (!regId && !phone && !name) {
+        regId = decodedText.trim();
+      }
+
+      sendCheckInRequest({ regId, name, phone });
+    }
+
+    // 手動輸入報到
+    function handleManualCheckIn() {
+      const val = document.getElementById("manualInput").value.trim();
+      if (!val) return alert("請輸入報到編號或手機號碼！");
+      if (isProcessing) return;
+
+      isProcessing = true;
+      sendCheckInRequest({ regId: val, phone: val });
+    }
+
+    // 發送至 GAS 後端
+    function sendCheckInRequest(payload) {
+      document.getElementById("resultCard").style.display = "block";
+      document.getElementById("resultCard").className = "result-card";
+      document.getElementById("resultStatus").innerText = "連線報到中，請稍候...";
+      document.getElementById("guestInfo").innerHTML = "";
+      document.getElementById("resultBadge").innerText = "";
+
+      fetch(SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors", // 傳送標準 JSON
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      // 由於 Apps Script 跨域限制，採用直接 Fetch 並解析資料
+      fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .then(res => renderResult(res))
+      .catch(err => {
+        renderResult({ success: false, message: "網路連線異常或伺服器回應錯誤！" });
+      });
+    }
+
+    // 渲染報到結果卡片
+    function renderResult(res) {
+      const card = document.getElementById("resultCard");
+      const statusEl = document.getElementById("resultStatus");
+      const badgeEl = document.getElementById("resultBadge");
+      const infoEl = document.getElementById("guestInfo");
+
+      card.style.display = "block";
+
+      if (res.success && !res.alreadyCheckedIn) {
+        card.className = "result-card result-success";
+        statusEl.innerText = "✅ 報到成功！";
+        badgeEl.innerText = "#" + res.guest.regId;
+        infoEl.innerHTML = `
+          <div><strong>貴賓姓名：</strong>${res.guest.name}</div>
+          <div><strong>公司名稱：</strong>${res.guest.company || "—"}</div>
+          <div><strong>職稱：</strong>${res.guest.title || "—"}</div>
+          <div><strong>報到時間：</strong>${res.guest.checkinTime}</div>
+        `;
+      } else if (res.success && res.alreadyCheckedIn) {
+        card.className = "result-card result-warning";
+        statusEl.innerText = "⚠️ 該貴賓已於先前完成報到！";
+        badgeEl.innerText = "#" + res.guest.regId;
+        infoEl.innerHTML = `
+          <div><strong>貴賓姓名：</strong>${res.guest.name}</div>
+          <div><strong>公司名稱：</strong>${res.guest.company || "—"}</div>
+          <div><strong>原報到時間：</strong>${res.guest.checkinTime}</div>
+        `;
+      } else {
+        card.className = "result-card result-error";
+        statusEl.innerText = "❌ 報到失敗";
+        badgeEl.innerText = "";
+        infoEl.innerHTML = `<div>${res.message}</div>`;
+      }
+    }
+
+    // 繼續掃描下一位
+    function resumeScanning() {
+      document.getElementById("resultCard").style.display = "none";
+      document.getElementById("manualInput").value = "";
+      isProcessing = false;
+    }
+
+    // 掃描嗶聲音效 (Web Audio API)
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        gain.gain.value = 0.15;
+        osc.start();
+        setTimeout(() => { osc.stop(); ctx.close(); }, 120);
+      } catch (e) {}
+    }
+
+    window.onload = startCamera;
+  </script>
+</body>
+</html>
