@@ -154,7 +154,7 @@
   </div>
 
   <script>
-    // ⚙️ 請貼上剛剛在 Google Apps Script 部署取得的 Web App 網址：
+    // ⚙️ 請貼上您在 Google Apps Script 部署取得的 Web App 網址：
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzki-UTmUjj2LCAajKwCvlDytcJEFTf6KiNsC-RCi7yMctKFHd5HI31aTUhDKwEul4_nA/exec";
 
     let html5QrCode = null;
@@ -166,12 +166,11 @@
       const config = { fps: 10, qrbox: { width: 220, height: 220 } };
 
       html5QrCode.start(
-        { facingMode: "environment" }, // 優先使用手機後鏡頭
+        { facingMode: "environment" },
         config,
         onScanSuccess
       ).catch(err => {
         console.error("相機啟動失敗:", err);
-        alert("無法啟用相機，請確認是否允許瀏覽器使用相機權限，且網址需為 HTTPS 連線！");
       });
     }
 
@@ -180,9 +179,14 @@
       if (isProcessing) return;
       isProcessing = true;
 
-      playBeep(); // 播放掃描成功提示音
+      playBeep(); // 播放音效
 
-      // 解析 QR Code 內容 (格式如: 編號:001|姓名:Annie|電話:0912345678)
+      // 暫停鏡頭掃描，避免重複讀取
+      if (html5QrCode) {
+        html5QrCode.pause();
+      }
+
+      // 解析 QR Code 內容
       let regId = "", name = "", phone = "";
       const parts = decodedText.split("|");
       parts.forEach(p => {
@@ -191,7 +195,6 @@
         if (p.includes("電話:")) phone = p.replace("電話:", "").trim();
       });
 
-      // 若非特殊格式，直接將整個字串作為 ID/手機送出
       if (!regId && !phone && !name) {
         regId = decodedText.trim();
       }
@@ -206,25 +209,21 @@
       if (isProcessing) return;
 
       isProcessing = true;
+      if (html5QrCode) html5QrCode.pause();
+
       sendCheckInRequest({ regId: val, phone: val });
     }
 
-    // 發送至 GAS 後端
+    // 發送至 GAS 後端 (已修復為單次請求)
     function sendCheckInRequest(payload) {
-      document.getElementById("resultCard").style.display = "block";
-      document.getElementById("resultCard").className = "result-card";
+      const card = document.getElementById("resultCard");
+      card.style.display = "block";
+      card.className = "result-card";
       document.getElementById("resultStatus").innerText = "連線報到中，請稍候...";
       document.getElementById("guestInfo").innerHTML = "";
       document.getElementById("resultBadge").innerText = "";
 
-      fetch(SCRIPT_URL, {
-        method: "POST",
-        mode: "no-cors", // 傳送標準 JSON
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      // 由於 Apps Script 跨域限制，採用直接 Fetch 並解析資料
+      // 只發送單一 POST 請求
       fetch(SCRIPT_URL, {
         method: "POST",
         body: JSON.stringify(payload)
@@ -236,7 +235,7 @@
       });
     }
 
-    // 渲染報到結果卡片
+    // 渲染報到結果
     function renderResult(res) {
       const card = document.getElementById("resultCard");
       const statusEl = document.getElementById("resultStatus");
@@ -277,9 +276,14 @@
       document.getElementById("resultCard").style.display = "none";
       document.getElementById("manualInput").value = "";
       isProcessing = false;
+      
+      // 恢復相機掃描
+      if (html5QrCode) {
+        html5QrCode.resume();
+      }
     }
 
-    // 掃描嗶聲音效 (Web Audio API)
+    // 提示音效
     function playBeep() {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
